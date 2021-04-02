@@ -9,49 +9,48 @@ from abc import ABC, abstractmethod
 
 
 class Pagination:
-    def __init__(self, url, **params):
+    def __init__(self, resource, key, **params):
         # {'pageIndex': 1, 'pageSize': 100}
-        self.url_params = params if len(params) > 0 else dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
-        self.url = self.build_url(url, params)
+        self.url_params = params if len(params) > 0 else \
+            dict(urllib.parse.parse_qsl(urllib.parse.urlparse(resource).query))
+        self.url = self.build_url(resource, params)
+        self.key = key
 
-    def next(self, key):
-        self.url_params[key] = int(self.url_params[key]) + 1
-        self.build_url()
+    def __iter__(self):
+        return self
 
-    def build_url(self, url, url_params):
+    def __next__(self):
+        self.url_params[self.key] = int(self.url_params.get(self.key, 0)) + 1
+        return self.build_url(self.url, self.url_params)
+
+    @staticmethod
+    def build_url(url, url_params):
         return urllib.parse.urlunparse(
             urllib.parse.urlparse(url)._replace(query=urllib.parse.urlencode(url_params)))
 
 
-class Batch:
-    def __init__(self, pagination=Pagination):
-        self.buff = list()
-        self.pagination = pagination
+class BuffStream:
+    def __init__(self, pagination: Pagination = None, buff_size: int = 5):
+        self.buff_size = buff_size
+        self.stream = pagination
 
     def __repr__(self):
-        v = [e for e in self[:3]]
-        return f'{self.__class__.__name__}({v})'
+        return f'{self.__class__.__name__}'
 
-    def __getitem__(self, item):
-        return self.buff[item]
+    def __iter__(self):
+        return self
 
-    def append(self, v):
-        self.buff.append(v)
-
-    def __len__(self):
-        return len(self.buff)
-
-    @staticmethod
-    def batcher(stream, batch_size=5) -> list:
-        batch = Batch()
-        for e in stream:
-            batch.append(e)
-            if len(batch) == batch_size:
-                yield batch
-                batch = Batch()
-
-        if len(batch) != 0:
-            yield batch
+    def __next__(self) -> list:
+        buff = []
+        for e in self.stream:
+            if len(buff) < self.buff_size:
+                buff.append(e)
+            else:
+                break
+        if len(buff) > 0:
+            return buff
+        else:
+            raise StopIteration
 
 
 class Metadata(ABC):
@@ -59,6 +58,7 @@ class Metadata(ABC):
     @abstractmethod
     def write(domain_name, content, url):
         pass
+
 
 class CSVMetadata(Metadata):
     @staticmethod
@@ -69,30 +69,26 @@ class CSVMetadata(Metadata):
 
 
 class Request:
-    def __init__(self, batch_url: Batch):
-        self.batch_url = batch_url
+    def __init__(self, buff: BuffStream):
+        self.buff = buff
+        self.is_buff_depleted = False
 
     async def get(self, headers=None, callback=None):
         async with aiohttp.ClientSession() as session:
-            tasks = []
-            for batch in self.batch_url:
-                for url in batch:
-                    t = asyncio.create_task(callback(session, url, headers))
-                    tasks.append(t)
-            for task in asyncio.as_completed(tasks):
-                yield task
+            for batch in self.buff:
+                tasks = [asyncio.create_task(callback(session, url, headers)) for url in batch]
+                yield tasks
+                if self.is_buff_depleted is True:
+                    break
 
-    async def to_csv(self, coro, sep='|', compress=None, header=True, metadata=None):
+    async def output(self, coro, **kwargs):
         tasks = coro
-        async for task in tasks:
-            output = await task
-            output._write(header=header, compress=compress, sep=sep, metadata=metadata)
-
-    async def to_memory(self, coro):
-        tasks = coro
-        async for task in tasks:
-            output = await task
-            output._write()
+        async for task_b in tasks:
+            for task in asyncio.as_completed(task_b):
+                output = await task
+                if output.content is None or len(output.content) == 0:
+                    self.is_buff_depleted = True
+                output._write(**kwargs)
 
     def run(self, output):
         r = asyncio.run(output)
