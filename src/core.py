@@ -1,10 +1,52 @@
 import aiohttp
 import asyncio
-import csv
 import io
 import gzip
 import urllib
 from abc import ABC, abstractmethod
+import csv
+from pathlib import Path
+
+
+class Metadata(ABC):
+    file_extension = ''
+    filename = ''
+
+    def __init__(self, basepath):
+        self.basepath = basepath
+        self.clean()
+
+    def filepath(self) -> Path:
+        return Path(self.basepath).joinpath(f'{self.filename}.{self.file_extension}')
+
+    @abstractmethod
+    def write(self, output):
+        raise NotImplementedError
+
+    @abstractmethod
+    def clean(self):
+        raise NotImplemented
+
+
+class DummyMetadata(Metadata):
+    def write(self, output):
+        pass
+
+    def clean(self):
+        pass
+
+
+class CSVMetadata(Metadata):
+    file_extension = 'csv'
+    filename = 'metadata'
+
+    def write(self, output):
+        with self.filepath().open('a', encoding='utf-8', newline='') as f:
+            csv_writer = csv.writer(f)
+            csv_writer.writerow([str(len(output.content)), output.filepath().name, output.url])
+
+    def clean(self):
+        self.filepath().unlink()
 
 
 class Stream(ABC):
@@ -36,9 +78,14 @@ class BaseStream(Stream):
             self.stream = iter(seq)
         elif isinstance(seq, iter):
             self.stream = seq
+        else:
+            self.stream = []
+
+    def set_next(self, value):
+        return next(self.stream)
 
     def __next__(self):
-        return next(self.stream)
+        return self.set_next(None)
 
 
 class StreamPage(Stream):
@@ -95,21 +142,6 @@ class BuffStream:
             raise StopIteration
 
 
-class Metadata(ABC):
-    @staticmethod
-    @abstractmethod
-    def write(domain_name, content, url):
-        pass
-
-
-class CSVMetadata(Metadata):
-    @staticmethod
-    def write(domain_name, content, url):
-        with open(f'{domain_name}.metadata.csv', 'a', encoding='utf-8', newline='') as f:
-            csv_writer = csv.writer(f)
-            csv_writer.writerow([url, str(len(content))])
-
-
 async def except_fn(callback, session, url, headers):
     try:
         return await callback(session, url, headers)
@@ -130,7 +162,7 @@ class Request:
                 if self.is_buff_depleted is True:
                     break
 
-    async def output(self, coro, **kwargs):
+    async def output(self, coro, metadata: Metadata, **kwargs):
         tasks = coro
         async for task_b in tasks:
             for task in asyncio.as_completed(task_b, timeout=5):
@@ -141,6 +173,8 @@ class Request:
                     if output.content is None or len(output.content) == 0:
                         self.is_buff_depleted = True
                     output.write(**kwargs)
+                    metadata.write(output)
+                    #output.clean()
                 except asyncio.exceptions.TimeoutError:
                     pass
 

@@ -1,7 +1,8 @@
 import unittest
-from src.core import Request, BuffStream, StreamPage, StreamPageWait
+from src.core import Request, BuffStream, StreamPage, StreamPageWait, CSVMetadata
 from src.io import Stdout
 import json
+from src.core import DummyMetadata
 
 
 class TestPageStream(unittest.TestCase):
@@ -12,13 +13,13 @@ class TestPageStream(unittest.TestCase):
                 if response.status == 200:
                     r = await response.json()
                     r = json.loads(r)
-                    return Stdout(r, url)
+                    return Stdout(r, url, basepath='tmp')
                 else:
-                    return Stdout(None, url)
+                    return Stdout(None, url, basepath='tmp')
 
         buff = BuffStream(stream=StreamPage(resource="http://localhost:8080/pag", key='pageIndex'))
         request = Request(buff=buff)
-        output = request.output(request.get(callback=pprint))
+        output = request.output(request.get(callback=pprint), metadata=DummyMetadata)
         tasks = request.run(output)
 
     def test_seq_pag(self):
@@ -27,15 +28,16 @@ class TestPageStream(unittest.TestCase):
                 if response.status == 200:
                     r = await response.json()
                     r = json.loads(r)
-                    return Stdout(r, url, headers=response.headers)
+                    return Stdout(r, url, headers=response.headers, basepath='tmp')
                 else:
-                    return Stdout(None, url)
+                    return Stdout(None, url, basepath='tmp')
 
         buff = BuffStream(stream=StreamPageWait(resource="http://localhost:8080/pag_h", key='pageIndex',
                                                 response_wait_key='next', pageSize=100))
         request = Request(buff=buff)
-        output = request.output(request.get(callback=pprint))
+        output = request.output(request.get(callback=pprint), metadata=CSVMetadata('tmp'))
         tasks = request.run(output)
+
 
 
 if __name__ == '__main__':

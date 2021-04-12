@@ -1,23 +1,43 @@
 import uuid
 import urllib
 from abc import ABC, abstractmethod
-from .core import Metadata, CSVMetadata
 import io
 import csv
+import logging
+from pathlib import Path
+
+
+log = logging.getLogger(__file__)
+log_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+log_handler.setFormatter(formatter)
+log.addHandler(log_handler)
+log.setLevel(logging.INFO)
+
 
 try:
     import pyorc
 except ImportError:
-    pass
+    log.debug("pyrorc is not installed")
 
 
 class Output(ABC):
-    def __init__(self, content: list, url: str, headers: dict = None):
+    file_extension = None
+    basepath = ''
+
+    def __init__(self, content: list, url: str, headers: dict = None, basepath: str = ''):
         self.content = content
         self.url = url
         self.id = str(uuid.uuid5(uuid.NAMESPACE_DNS, url))
         self.domain_name = urllib.parse.urlparse(self.url).netloc
         self.headers = headers
+        self.basepath = basepath
+
+    def filepath(self) -> Path:
+        filename = f'{self.id}.{self.file_extension}'
+        path = Path(self.basepath)
+        path.mkdir(parents=False, exist_ok=True)
+        return path.joinpath(filename)
 
     @abstractmethod
     def write(self):
@@ -35,9 +55,15 @@ class Output(ABC):
         else:
             return None
 
+    @abstractmethod
+    def clean(self):
+        raise NotImplementedError
+
 
 class CsvOutput(Output):
-    def write(self, header=True, compress=None, sep='|', metadata: Metadata = CSVMetadata):
+    file_extension = 'csv'
+
+    def write(self, header=True, compress=None, sep='|'):
         if not self.is_valid():
             raise Exception("not csv compatible")
         names = self.get_header()
@@ -47,24 +73,35 @@ class CsvOutput(Output):
             dict_writer.writeheader()
         dict_writer.writerows(self.content)
         if compress is None:
-            with open(f'{self.id}.csv', 'w', encoding='utf-8', newline='') as f:
+            with self.filepath().open('w', encoding='utf-8', newline='') as f:
                 f.write(output_io.getvalue())
         else:
             compress(self.id, output_io)
-        if metadata is not None:
-            metadata.write(self.domain_name, self.content, self.url)
 
     def is_valid(self) -> bool:
         return self.get_header() is not None
 
+    def clean(self):
+        self.filepath().unlink()
+
 
 class Stdout(Output):
+    file_extension = 'txt'
+
     def write(self):
-        print(self.content)
+        log.info(self.content)
+        if len(self.content) > 0:
+            with self.filepath().open('w', encoding='utf-8') as f:
+                f.write(str(self.content))
+
+    def clean(self):
+        self.filepath().unlink()
 
 
 class OrcOuput(Output):
-    def write(self, srt_type: dict = None, metadata: Metadata = CSVMetadata):
+    file_extension = 'orc'
+
+    def write(self, srt_type: dict = None):
         headers = self.get_header()
         cols = []
         for key in headers:
@@ -72,7 +109,10 @@ class OrcOuput(Output):
             cols.append(f'{key}:{ctype}')
         str_cols = ",".join(cols)
         struct_col = f"struct<{str_cols}>"
-        with open(f'{self.id}.orc', "wb") as f:
+        with self.filepath().open("wb") as f:
             with pyorc.Writer(f, struct_col) as writer:
                 for r in self.content:
                     writer.write(tuple(r.values()))
+
+    def clean(self):
+        self.filepath().unlink()
