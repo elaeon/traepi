@@ -12,11 +12,12 @@ except ImportError:
 
 
 class Output(ABC):
-    def __init__(self, content: list, url: str):
+    def __init__(self, content: list, url: str, headers: dict = None):
         self.content = content
         self.url = url
         self.id = str(uuid.uuid5(uuid.NAMESPACE_DNS, url))
         self.domain_name = urllib.parse.urlparse(self.url).netloc
+        self.headers = headers
 
     @abstractmethod
     def write(self):
@@ -27,7 +28,7 @@ class Output(ABC):
             if isinstance(self.content[0], dict):
                 return self.content[0].keys()
             else:
-                fake_header = {f'col{1}': False for i in range(len(self.content))}
+                fake_header = {f'col{i}': False for i in range(len(self.content))}
                 return fake_header.keys()
         elif isinstance(self.content, dict):
             return self.content.keys()
@@ -67,12 +68,10 @@ class OrcOuput(Output):
         headers = self.get_header()
         cols = []
         for key in headers:
-            type = srt_type[key]
-            cols.append(f'{key}:{type}')
+            ctype = srt_type[key]
+            cols.append(f'{key}:{ctype}')
         str_cols = ",".join(cols)
         struct_col = f"struct<{str_cols}>"
-        print(struct_col)
-        #output_io = io.StringIO()
         with open(f'{self.id}.orc', "wb") as f:
             with pyorc.Writer(f, struct_col) as writer:
                 for r in self.content:

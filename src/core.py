@@ -8,12 +8,21 @@ from abc import ABC, abstractmethod
 
 
 class Stream(ABC):
+    response_wait_key = None
+    url = None
+    url_params = None
+    key = None
+
     @abstractmethod
     def __next__(self):
         raise NotImplemented
 
     def __iter__(self):
         return self
+
+    @abstractmethod
+    def set_next(self, value):
+        raise NotImplemented
 
     @staticmethod
     def build_url(url, url_params):
@@ -33,21 +42,39 @@ class BaseStream(Stream):
 
 
 class StreamPage(Stream):
-    def __init__(self, resource, key, **params):
+    def __init__(self, resource, key, response_wait_key=None, **params):
         # {'pageIndex': 1, 'pageSize': 100}
         self.url_params = params if len(params) > 0 else \
             dict(urllib.parse.parse_qsl(urllib.parse.urlparse(resource).query))
-        self.url = self.build_url(resource, params)
+        self.url = self.build_url(resource, self.url_params)
         self.key = key
+        self.response_wait_key = response_wait_key
+
+    def set_next(self, value):
+        self.url_params[self.key] = value
 
     def __next__(self):
-        self.url_params[self.key] = int(self.url_params.get(self.key, 0)) + 1
+        try:
+            self.set_next(int(self.url_params[self.key]) + 1)
+        except KeyError:
+            url = self.build_url(self.url, self.url_params)
+            self.url_params[self.key] = 0
+            return url
+        else:
+            return self.build_url(self.url, self.url_params)
+
+
+class StreamPageWait(StreamPage):
+    def __next__(self):
         return self.build_url(self.url, self.url_params)
 
 
 class BuffStream:
     def __init__(self, stream: Stream = None, buff_size: int = 5):
-        self.buff_size = buff_size
+        if isinstance(stream, StreamPageWait):
+            self.buff_size = 1
+        else:
+            self.buff_size = buff_size
         self.stream = stream
 
     def __repr__(self):
@@ -59,9 +86,8 @@ class BuffStream:
     def __next__(self) -> list:
         buff = []
         for e in self.stream:
-            if len(buff) < self.buff_size:
-                buff.append(e)
-            else:
+            buff.append(e)
+            if len(buff) >= self.buff_size:
                 break
         if len(buff) > 0:
             return buff
@@ -110,13 +136,16 @@ class Request:
             for task in asyncio.as_completed(task_b, timeout=5):
                 try:
                     output = await task
+                    if self.buff.stream.response_wait_key is not None:
+                        self.buff.stream.set_next(output.headers.get(self.buff.stream.response_wait_key))
                     if output.content is None or len(output.content) == 0:
                         self.is_buff_depleted = True
                     output.write(**kwargs)
                 except asyncio.exceptions.TimeoutError:
                     pass
 
-    def run(self, output):
+    @staticmethod
+    def run(output):
         r = asyncio.run(output)
         return r
 
@@ -124,5 +153,3 @@ class Request:
 def gzipf(filename: str, buffer: io.StringIO):
     with gzip.GzipFile(f'{filename}.csv.gz', mode='wb') as f:
         f.write(buffer.getvalue().encode())
-
-

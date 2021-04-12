@@ -15,7 +15,7 @@ class TestBuffStream(unittest.TestCase):
                     r = json.loads(r)
                     return OrcOuput(r, url)
                 else:
-                    return OrcOuput(None, url)
+                    return OrcOuput([], url)
 
         buff = BuffStream(stream=BaseStream(["http://localhost:8080/1", "http://localhost:8080/2",
                                              "http://localhost:8080/3"]))
