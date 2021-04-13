@@ -1,3 +1,4 @@
+import logging
 import aiohttp
 import asyncio
 import io
@@ -6,6 +7,14 @@ import urllib
 from abc import ABC, abstractmethod
 import csv
 from pathlib import Path
+
+
+log = logging.getLogger(__file__)
+log_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+log_handler.setFormatter(formatter)
+log.addHandler(log_handler)
+log.setLevel(logging.INFO)
 
 
 class Metadata(ABC):
@@ -41,12 +50,22 @@ class CSVMetadata(Metadata):
     filename = 'metadata'
 
     def write(self, output):
-        with self.filepath().open('a', encoding='utf-8', newline='') as f:
-            csv_writer = csv.writer(f)
-            csv_writer.writerow([str(len(output.content)), output.filepath().name, output.url])
+        if len(output.content) > 0:
+            with self.filepath().open('a', encoding='utf-8', newline='') as f:
+                csv_writer = csv.writer(f)
+                csv_writer.writerow([str(len(output.content)), output.filepath().name, output.url])
+
+    def read(self):
+        with self.filepath().open('r', encoding='utf-8') as f:
+            csv_reader = csv.reader(f)
+            for line in csv_reader:
+                yield line
 
     def clean(self):
-        self.filepath().unlink()
+        try:
+            self.filepath().unlink()
+        except FileNotFoundError:
+            pass
 
 
 class Stream(ABC):
@@ -72,6 +91,7 @@ class Stream(ABC):
             urllib.parse.urlparse(url)._replace(query=urllib.parse.urlencode(url_params)))
 
 
+# fixme: for reliability would be good change BaseStream name to Stream
 class BaseStream(Stream):
     def __init__(self, seq):
         if isinstance(seq, list) or isinstance(seq, tuple):
@@ -146,7 +166,7 @@ async def except_fn(callback, session, url, headers):
     try:
         return await callback(session, url, headers)
     except aiohttp.ServerDisconnectedError:
-        pass
+        log.info("Server disconnected")
 
 
 class Request:
@@ -162,10 +182,10 @@ class Request:
                 if self.is_buff_depleted is True:
                     break
 
-    async def output(self, coro, metadata: Metadata, **kwargs):
+    async def output(self, coro, metadata: Metadata, clean: bool = False, timeout=5, **kwargs):
         tasks = coro
         async for task_b in tasks:
-            for task in asyncio.as_completed(task_b, timeout=5):
+            for task in asyncio.as_completed(task_b, timeout=timeout):
                 try:
                     output = await task
                     if self.buff.stream.response_wait_key is not None:
@@ -174,9 +194,10 @@ class Request:
                         self.is_buff_depleted = True
                     output.write(**kwargs)
                     metadata.write(output)
-                    #output.clean()
-                except asyncio.exceptions.TimeoutError:
-                    pass
+                    if clean:
+                        output.clean()
+                except asyncio.exceptions.TimeoutError as e:
+                    log.info(e)
 
     @staticmethod
     def run(output):

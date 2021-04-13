@@ -82,20 +82,20 @@ class CsvOutput(Output):
         return self.get_header() is not None
 
     def clean(self):
-        self.filepath().unlink()
+        self.filepath().unlink(True)
 
 
 class Stdout(Output):
     file_extension = 'txt'
 
     def write(self):
-        log.info(self.content)
+        log.info(len(self.content))
         if len(self.content) > 0:
             with self.filepath().open('w', encoding='utf-8') as f:
                 f.write(str(self.content))
 
     def clean(self):
-        self.filepath().unlink()
+        self.filepath().unlink(True)
 
 
 class OrcOuput(Output):

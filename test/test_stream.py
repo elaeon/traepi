@@ -19,8 +19,8 @@ class TestPageStream(unittest.TestCase):
 
         buff = BuffStream(stream=StreamPage(resource="http://localhost:8080/pag", key='pageIndex'))
         request = Request(buff=buff)
-        output = request.output(request.get(callback=pprint), metadata=DummyMetadata)
-        tasks = request.run(output)
+        output = request.output(request.get(callback=pprint), metadata=DummyMetadata('tmp'), clean=True)
+        request.run(output)
 
     def test_seq_pag(self):
         async def pprint(session, url, headers):
@@ -35,9 +35,11 @@ class TestPageStream(unittest.TestCase):
         buff = BuffStream(stream=StreamPageWait(resource="http://localhost:8080/pag_h", key='pageIndex',
                                                 response_wait_key='next', pageSize=100))
         request = Request(buff=buff)
-        output = request.output(request.get(callback=pprint), metadata=CSVMetadata('tmp'))
-        tasks = request.run(output)
-
+        metadata = CSVMetadata('tmp')
+        output = request.output(request.get(callback=pprint), metadata=metadata)
+        request.run(output)
+        for line in metadata.read():
+            assert int(line[0]) >= 1
 
 
 if __name__ == '__main__':

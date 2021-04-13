@@ -3,6 +3,17 @@ import asyncio
 import json
 import datetime
 import multidict
+import random
+
+
+def gen_data(page_index, request) -> list:
+    t = []
+    for i in range(random.randint(1, 10)):
+        t.append({
+            "id": i,
+            "text": str(request.url),
+            "date": datetime.datetime.today().strftime("%Y-%m-%d %H:%M:%S.%f")})
+    return t
 
 
 async def handle(request):
@@ -19,13 +30,10 @@ async def handle(request):
 
 async def pagination(request):
     page_index = int(request.query.get('pageIndex', '0'))
-    t = []
     if page_index < 5:
-        t.append({
-            "id": page_index,
-            "text": str(request.url),
-            "date": datetime.datetime.today().strftime("%Y-%m-%d %H:%M:%S.%f")})
-
+        t = gen_data(page_index, request)
+    else:
+        t = []
     text = json.dumps(t)
     await asyncio.sleep(.2)
     return web.json_response(text)
@@ -33,13 +41,10 @@ async def pagination(request):
 
 async def pagination_header(request):
     page_index = int(request.query.get('pageIndex', '0'))
-    t = []
     if page_index < 5:
-        t.append({
-            "id": page_index,
-            "text": str(request.url),
-            "date": datetime.datetime.today().strftime("%Y-%m-%d %H:%M:%S.%f")})
-
+        t = gen_data(page_index, request)
+    else:
+        t = []
     text = json.dumps(t)
     await asyncio.sleep(.2)
     return web.json_response(text, headers=multidict.CIMultiDict({'next': str(int(page_index) + 1)}))
