@@ -36,6 +36,10 @@ class Metadata(ABC):
     def clean(self):
         raise NotImplemented
 
+    @abstractmethod
+    def error(self, name, url):
+        raise NotImplemented
+
 
 class DummyMetadata(Metadata):
     def write(self, output):
@@ -43,6 +47,9 @@ class DummyMetadata(Metadata):
 
     def clean(self):
         pass
+
+    def error(self, name, url):
+        log.info(f'{name}, {url}')
 
 
 class CSVMetadata(Metadata):
@@ -66,6 +73,11 @@ class CSVMetadata(Metadata):
             self.filepath().unlink()
         except FileNotFoundError:
             pass
+
+    def error(self, name, url):
+        with self.filepath().open('a', encoding='utf-8', newline='') as f:
+            csv_writer = csv.writer(f)
+            csv_writer.writerow([name, '', url])
 
 
 class Stream(ABC):
@@ -162,27 +174,28 @@ class BuffStream:
             raise StopIteration
 
 
-async def except_fn(callback, session, url, headers):
-    try:
-        return await callback(session, url, headers)
-    except aiohttp.ServerDisconnectedError:
-        log.info("Server disconnected")
-
-
 class Request:
-    def __init__(self, buff: BuffStream):
+    def __init__(self, buff: BuffStream, metadata: Metadata):
         self.buff = buff
         self.is_buff_depleted = False
+        self.metadata = metadata
+
+    async def except_fn(self, callback, session, url, headers):
+        try:
+            return await callback(session, url, headers)
+        except aiohttp.ServerDisconnectedError:
+            self.metadata.error("timeout", url)
+            log.info("Server disconnected")
 
     async def get(self, headers=None, callback=None):
         for batch in self.buff:
             async with aiohttp.ClientSession() as session:
-                tasks = [asyncio.create_task(except_fn(callback, session, url, headers)) for url in batch]
+                tasks = [asyncio.create_task(self.except_fn(callback, session, url, headers)) for url in batch]
                 yield tasks
                 if self.is_buff_depleted is True:
                     break
 
-    async def output(self, coro, metadata: Metadata, clean: bool = False, timeout=5, **kwargs):
+    async def output(self, coro, clean: bool = False, timeout=5, **kwargs):
         tasks = coro
         async for task_b in tasks:
             for task in asyncio.as_completed(task_b, timeout=timeout):
@@ -193,11 +206,11 @@ class Request:
                     if output.content is None or len(output.content) == 0:
                         self.is_buff_depleted = True
                     output.write(**kwargs)
-                    metadata.write(output)
+                    self.metadata.write(output)
                     if clean:
                         output.clean()
-                except asyncio.exceptions.TimeoutError as e:
-                    log.info(e)
+                except asyncio.exceptions.TimeoutError:
+                    log.info(f"Request timeout")
 
     @staticmethod
     def run(output):

@@ -85,7 +85,7 @@ class CsvOutput(Output):
         self.filepath().unlink(True)
 
 
-class Stdout(Output):
+class TextOutput(Output):
     file_extension = 'txt'
 
     def write(self):
