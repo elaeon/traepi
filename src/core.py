@@ -72,7 +72,7 @@ class CSVMetadata(Metadata):
         try:
             self.filepath().unlink()
         except FileNotFoundError:
-            pass
+            log.exception("File not Found")
 
     def error(self, name, url):
         with self.filepath().open('a', encoding='utf-8', newline='') as f:

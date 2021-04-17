@@ -1,10 +1,11 @@
-import uuid
 import urllib
-from abc import ABC, abstractmethod
 import io
 import csv
 import logging
 from pathlib import Path
+import uuid
+from .abc.io import OutputABC
+from abc import abstractmethod
 
 
 log = logging.getLogger(__file__)
@@ -21,7 +22,7 @@ except ImportError:
     log.debug("pyrorc is not installed")
 
 
-class Output(ABC):
+class Output(OutputABC):
     file_extension = None
     basepath = ''
 
@@ -39,10 +40,6 @@ class Output(ABC):
         path.mkdir(parents=False, exist_ok=True)
         return path.joinpath(filename)
 
-    @abstractmethod
-    def write(self):
-        raise NotImplementedError
-
     def get_header(self) -> dict.keys:
         if isinstance(self.content, list):
             if isinstance(self.content[0], dict):
@@ -54,6 +51,10 @@ class Output(ABC):
             return self.content.keys()
         else:
             return None
+
+    @abstractmethod
+    def write(self):
+        raise NotImplementedError
 
     @abstractmethod
     def clean(self):
