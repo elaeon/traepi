@@ -23,22 +23,19 @@ except ImportError:
 
 
 class Output(OutputABC):
-    file_extension = None
-    basepath = ''
 
-    def __init__(self, content: list, url: str, headers: dict = None, basepath: str = ''):
+    def __init__(self, content: list, url: str, headers: dict = None, basepath: Path = None):
         self.content = content
         self.url = url
         self.id = str(uuid.uuid5(uuid.NAMESPACE_DNS, url))
         self.domain_name = urllib.parse.urlparse(self.url).netloc
         self.headers = headers
-        self.basepath = basepath
+        self.basepath = basepath.resolve()
 
     def filepath(self) -> Path:
         filename = f'{self.id}.{self.file_extension}'
-        path = Path(self.basepath)
-        path.mkdir(parents=False, exist_ok=True)
-        return path.joinpath(filename)
+        self.basepath.mkdir(parents=False, exist_ok=True)
+        return self.basepath.joinpath(filename)
 
     def get_header(self) -> dict.keys:
         if isinstance(self.content, list):

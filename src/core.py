@@ -4,8 +4,9 @@ import asyncio
 import io
 import gzip
 import urllib
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 import csv
+from .abc.core import MetadataABC, StreamABC
 from pathlib import Path
 
 
@@ -17,31 +18,7 @@ log.addHandler(log_handler)
 log.setLevel(logging.INFO)
 
 
-class Metadata(ABC):
-    file_extension = ''
-    filename = ''
-
-    def __init__(self, basepath):
-        self.basepath = basepath
-        self.clean()
-
-    def filepath(self) -> Path:
-        return Path(self.basepath).joinpath(f'{self.filename}.{self.file_extension}')
-
-    @abstractmethod
-    def write(self, output):
-        raise NotImplementedError
-
-    @abstractmethod
-    def clean(self):
-        raise NotImplemented
-
-    @abstractmethod
-    def error(self, name, url):
-        raise NotImplemented
-
-
-class DummyMetadata(Metadata):
+class DummyMetadata(MetadataABC):
     def write(self, output):
         pass
 
@@ -52,7 +29,7 @@ class DummyMetadata(Metadata):
         log.info(f'{name}, {url}')
 
 
-class CSVMetadata(Metadata):
+class CSVMetadata(MetadataABC):
     file_extension = 'csv'
     filename = 'metadata'
 
@@ -68,8 +45,12 @@ class CSVMetadata(Metadata):
             for line in csv_reader:
                 yield line
 
-    def clean(self):
+    def clean(self, deep=True):
         try:
+            if deep is True:
+                for _, filename, _ in self.read():
+                    path = self.basepath.joinpath(filename)
+                    path.unlink(True)
             self.filepath().unlink()
         except FileNotFoundError:
             log.exception("File not Found")
@@ -80,18 +61,10 @@ class CSVMetadata(Metadata):
             csv_writer.writerow([name, '', url])
 
 
-class Stream(ABC):
-    response_wait_key = None
-    url = None
-    url_params = None
-    key = None
-
+class Stream(StreamABC):
     @abstractmethod
     def __next__(self):
         raise NotImplemented
-
-    def __iter__(self):
-        return self
 
     @abstractmethod
     def set_next(self, value):
@@ -103,8 +76,7 @@ class Stream(ABC):
             urllib.parse.urlparse(url)._replace(query=urllib.parse.urlencode(url_params)))
 
 
-# fixme: for reliability would be good change BaseStream name to Stream
-class BaseStream(Stream):
+class BaseStream(StreamABC):
     def __init__(self, seq):
         if isinstance(seq, list) or isinstance(seq, tuple):
             self.stream = iter(seq)
@@ -175,7 +147,7 @@ class BuffStream:
 
 
 class Request:
-    def __init__(self, buff: BuffStream, metadata: Metadata):
+    def __init__(self, buff: BuffStream, metadata: MetadataABC):
         self.buff = buff
         self.is_buff_depleted = False
         self.metadata = metadata
