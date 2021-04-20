@@ -1,13 +1,10 @@
 import logging
 import aiohttp
 import asyncio
-import io
-import gzip
 import urllib
 from abc import abstractmethod
 import csv
 from .abc.core import MetadataABC, StreamABC
-from pathlib import Path
 
 
 log = logging.getLogger(__file__)
@@ -121,7 +118,7 @@ class StreamPageWait(StreamPage):
 
 
 class BuffStream:
-    def __init__(self, stream: Stream = None, buff_size: int = 5):
+    def __init__(self, stream: StreamABC = None, buff_size: int = 5):
         if isinstance(stream, StreamPageWait):
             self.buff_size = 1
         else:
@@ -167,7 +164,7 @@ class Request:
                 if self.is_buff_depleted is True:
                     break
 
-    async def output(self, coro, clean: bool = False, timeout=5, **kwargs):
+    async def output(self, coro, clean: bool = False, timeout=5, compression=None, **kwargs):
         tasks = coro
         async for task_b in tasks:
             for task in asyncio.as_completed(task_b, timeout=timeout):
@@ -177,8 +174,16 @@ class Request:
                         self.buff.stream.set_next(output.headers.get(self.buff.stream.response_wait_key))
                     if output.content is None or len(output.content) == 0:
                         self.is_buff_depleted = True
-                    output.write(**kwargs)
-                    self.metadata.write(output)
+                    output.write_buff(**kwargs)
+                    if compression is not None:
+                        compression(output)
+                        compression.write_disk()
+                        self.metadata.write(compression)
+                        output.buffer = None
+                    else:
+                        output.write_disk()
+                        self.metadata.write(output)
+                    # output.close()
                     if clean:
                         output.clean()
                 except asyncio.exceptions.TimeoutError:
@@ -189,7 +194,3 @@ class Request:
         r = asyncio.run(output)
         return r
 
-
-def gzipf(filename: str, buffer: io.StringIO):
-    with gzip.GzipFile(f'{filename}.csv.gz', mode='wb') as f:
-        f.write(buffer.getvalue().encode())

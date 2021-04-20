@@ -6,6 +6,7 @@ from pathlib import Path
 import uuid
 from .abc.io import OutputABC
 from abc import abstractmethod
+import gzip
 
 
 log = logging.getLogger(__file__)
@@ -24,13 +25,14 @@ except ImportError:
 
 class Output(OutputABC):
 
-    def __init__(self, content: list, url: str, headers: dict = None, basepath: Path = None):
+    def __init__(self, content, url: str, headers: dict = None, basepath: Path = None):
         self.content = content
         self.url = url
         self.id = str(uuid.uuid5(uuid.NAMESPACE_DNS, url))
         self.domain_name = urllib.parse.urlparse(self.url).netloc
         self.headers = headers
         self.basepath = basepath.resolve()
+        self.buffer = None
 
     def filepath(self) -> Path:
         filename = f'{self.id}.{self.file_extension}'
@@ -50,8 +52,16 @@ class Output(OutputABC):
             return None
 
     @abstractmethod
-    def write(self):
+    def write_buff(self):
         raise NotImplementedError
+
+    @abstractmethod
+    def write_disk(self):
+        raise NotImplementedError
+
+    def write(self):
+        self.write_buff()
+        self.write_disk()
 
     @abstractmethod
     def clean(self):
@@ -61,20 +71,20 @@ class Output(OutputABC):
 class CsvOutput(Output):
     file_extension = 'csv'
 
-    def write(self, header=True, compress=None, sep='|'):
+    def write_buff(self, header=True, sep='|'):
         if not self.is_valid():
             raise Exception("not csv compatible")
         names = self.get_header()
-        output_io = io.StringIO()
-        dict_writer = csv.DictWriter(output_io, fieldnames=names, delimiter=sep)
+        self.buffer = io.StringIO()
+        dict_writer = csv.DictWriter(self.buffer, fieldnames=names, delimiter=sep)
         if header is True:
             dict_writer.writeheader()
         dict_writer.writerows(self.content)
-        if compress is None:
+
+    def write_disk(self):
+        if self.buffer is not None:
             with self.filepath().open('w', encoding='utf-8', newline='') as f:
-                f.write(output_io.getvalue())
-        else:
-            compress(self.id, output_io)
+                f.write(self.buffer.getvalue())
 
     def is_valid(self) -> bool:
         return self.get_header() is not None
@@ -86,11 +96,16 @@ class CsvOutput(Output):
 class TextOutput(Output):
     file_extension = 'txt'
 
-    def write(self):
+    def write_buff(self):
         log.info(len(self.content))
         if len(self.content) > 0:
+            self.buffer = io.StringIO()
+            self.buffer.write(str(self.content))
+
+    def write_disk(self):
+        if self.buffer is not None:
             with self.filepath().open('w', encoding='utf-8') as f:
-                f.write(str(self.content))
+                f.write(self.buffer.getvalue())
 
     def clean(self):
         self.filepath().unlink(True)
@@ -111,6 +126,26 @@ class OrcOuput(Output):
             with pyorc.Writer(f, struct_col) as writer:
                 for r in self.content:
                     writer.write(tuple(r.values()))
+
+    def clean(self):
+        self.filepath().unlink()
+
+
+class GzipOutput(Output):
+    file_extension = 'gz'
+
+    def __init__(self, output: Output):
+        super(GzipOutput, self).__init__(output.content, output.url, basepath=output.basepath)
+        self.output = output
+
+    def write_buff(self):
+        self.buffer = io.BytesIO()
+        with gzip.GzipFile(fileobj=self.buffer, mode='wb') as f:
+            f.write(self.output.buffer.getvalue().encode())
+
+    def write_disk(self):
+        with self.filepath().open(mode='wb') as f:
+            f.write(self.buffer.getvalue())
 
     def clean(self):
         self.filepath().unlink()

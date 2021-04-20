@@ -1,32 +1,42 @@
 import unittest
-from src.core import Request, BuffStream, gzipf, BaseStream
-from src.io import CsvOutput, Stdout, OrcOuput
-import json
-import time
+from src.io import CsvOutput, TextOutput, OrcOuput, GzipOutput
+from pathlib import Path
 
 
-class TestBuffStream(unittest.TestCase):
 
-    def test_request(self):
-        async def pprint(session, url, headers):
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    r = await response.json()
-                    r = json.loads(r)
-                    return OrcOuput(r, url)
-                else:
-                    return OrcOuput([], url)
+class TestOutput(unittest.TestCase):
 
-        buff = BuffStream(stream=BaseStream(["http://localhost:8080/1", "http://localhost:8080/2",
-                                             "http://localhost:8080/3"]))
-        print(buff)
-        start = time.time()
-        request = Request(buff=buff)
-        output = request.output(request.get(callback=pprint),
-                                srt_type={"id": "int", "text": "string", "date": "string"}, metadata=None)
-        tasks = request.run(output)
-        end = time.time()
-        print(tasks, end-start)
+    def test_orc(self):
+        basepath = Path('tmp')
+        # OrcOuput(r, url, basepath=basepath)
+        # output.write()
+        # assert output.filepath().stat().st_size == ?
+        # output.clean()
+
+    def test_csv(self):
+        basepath = Path('tmp')
+        output = CsvOutput([{"a": 1, "b": 2, "c": 3}], '', basepath=basepath)
+        output.write()
+        assert output.filepath().stat().st_size == 14
+        output.clean()
+
+    def test_txt(self):
+        basepath = Path('tmp')
+        output = TextOutput([{"a": 1, "b": 2, "c": 3}], '', basepath=basepath)
+        output.write()
+        assert output.filepath().stat().st_size == 26
+        output.clean()
+
+
+class TestCompress(unittest.TestCase):
+    def test_gzip(self):
+        basepath = Path('tmp')
+        output = TextOutput([{'a': 1}], '', basepath=basepath)
+        output.write_buff()
+        gz_out = GzipOutput(output)
+        gz_out.write_buff()
+        gz_out.write_disk()
+        gz_out.clean()
 
 
 if __name__ == '__main__':
