@@ -41,11 +41,14 @@ class Output(OutputABC):
 
     def get_header(self) -> dict.keys:
         if isinstance(self.content, list):
-            if isinstance(self.content[0], dict):
-                return self.content[0].keys()
+            if len(self.content) > 0:
+                if isinstance(self.content[0], dict):
+                    return self.content[0].keys()
+                else:
+                    fake_header = {f'col{i}': False for i in range(len(self.content))}
+                    return fake_header.keys()
             else:
-                fake_header = {f'col{i}': False for i in range(len(self.content))}
-                return fake_header.keys()
+                return ''
         elif isinstance(self.content, dict):
             return self.content.keys()
         else:

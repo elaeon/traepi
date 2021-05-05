@@ -149,17 +149,22 @@ class Request:
         self.is_buff_depleted = False
         self.metadata = metadata
 
-    async def except_fn(self, callback, session, url, headers):
+    async def except_fn(self, callback, session, url, headers, timeout):
         try:
-            return await callback(session, url, headers)
+            return await callback(session, url, headers, timeout)
         except aiohttp.ServerDisconnectedError:
             self.metadata.error("timeout", url)
             log.info("Server disconnected")
+        except aiohttp.client_exceptions.ClientConnectorError:
+            log.info("CLIENT EXCEPTION")
+        except asyncio.exceptions.TimeoutError:
+            log.info(f"Request timeout")
 
-    async def get(self, headers=None, callback=None):
+    async def get(self, headers=None, callback=None, timeout=20):
         for batch in self.buff:
             async with aiohttp.ClientSession() as session:
-                tasks = [asyncio.create_task(self.except_fn(callback, session, url, headers)) for url in batch]
+                tasks = [asyncio.create_task(self.except_fn(callback, session, url, headers, timeout))
+                         for url in batch]
                 yield tasks
                 if self.is_buff_depleted is True:
                     break
@@ -170,24 +175,27 @@ class Request:
             for task in asyncio.as_completed(task_b, timeout=timeout):
                 try:
                     output = await task
-                    if self.buff.stream.response_wait_key is not None:
-                        self.buff.stream.set_next(output.headers.get(self.buff.stream.response_wait_key))
-                    if output.content is None or len(output.content) == 0:
-                        self.is_buff_depleted = True
-                    output.write_buff(**kwargs)
-                    if compression is not None:
-                        compression(output)
-                        compression.write_disk()
-                        self.metadata.write(compression)
-                        output.buffer = None
+                    if output is None:
+                        pass
                     else:
-                        output.write_disk()
-                        self.metadata.write(output)
-                    # output.close()
-                    if clean:
-                        output.clean()
+                        if self.buff.stream.response_wait_key is not None:
+                            self.buff.stream.set_next(output.headers.get(self.buff.stream.response_wait_key))
+                        if output.content is None or len(output.content) == 0:
+                            self.is_buff_depleted = True
+                        output.write_buff(**kwargs)
+                        if compression is not None:
+                            compression(output)
+                            compression.write_disk()
+                            self.metadata.write(compression)
+                            output.buffer = None
+                        else:
+                            output.write_disk()
+                            self.metadata.write(output)
+                        # output.close()
+                        if clean:
+                            output.clean()
                 except asyncio.exceptions.TimeoutError:
-                    log.info(f"Request timeout")
+                    log.info(f"Async Request timeout")
 
     @staticmethod
     def run(output):

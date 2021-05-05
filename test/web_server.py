@@ -55,13 +55,25 @@ async def to_long_response(request):
     return web.json_response('{}')
 
 
+async def random_respose(request):
+    r = random.uniform(0, 1)
+    t = gen_data(0, request)
+    text = json.dumps(t)
+    if r > .5:
+        await asyncio.sleep(2)
+    else:
+        await asyncio.sleep(.2)
+    return web.json_response(text)
+
+
 app = web.Application()
 app.add_routes([web.get('/1', handle),
                 web.get('/2', handle),
                 web.get('/3', handle),
                 web.get('/pag', pagination),
                 web.get('/pag_h', pagination_header),
-                web.get('/long', to_long_response)])
+                web.get('/long', to_long_response),
+                web.get('/rand', random_respose)])
 
 
 if __name__ == '__main__':
